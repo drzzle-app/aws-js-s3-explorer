@@ -25,6 +25,7 @@ permissions and limitations under the License.
         <link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
         <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/font-awesome/4.1.0/css/font-awesome.min.css">
         <link rel="stylesheet" href="//cdn.datatables.net/plug-ins/f2c75b7247b/integration/bootstrap/3/dataTables.bootstrap.css">
+        <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/default.min.css">
         <style type="text/css">
             #wrapper { padding-left: 0; }
             #page-wrapper { width: 100%; padding: 5px 15px; }
@@ -32,6 +33,7 @@ permissions and limitations under the License.
             a { color: #00B7FF; }
             body { font: 14px "Lucida Grande", Helvetica, Arial, sans-serif; }
             td { font: 12px "Lucida Grande", Helvetica, Arial, sans-serif; }
+            code { display: block; white-space: pre-wrap; }
         </style>
     </head>
 
@@ -40,6 +42,21 @@ permissions and limitations under the License.
 
     <body>
         <div id="page-wrapper">
+
+          <!-- /.modal -->
+          <div id="documentContent" class="modal fade" tabindex="-1" role="dialog">
+            <div class="modal-dialog" role="document">
+              <div class="modal-content">
+                <div class="modal-body"><pre><code></code></pre></div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-primary downloadFile">Download</button>
+                  <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- /.modal -->
+
             <div class="row">
                 <div class="col-lg-12">
                     <div class="panel panel-primary">
@@ -118,6 +135,8 @@ permissions and limitations under the License.
 <script src="//cdnjs.cloudflare.com/ajax/libs/moment.js/2.7.0/moment.min.js"></script>
 <script src="//cdn.datatables.net/1.10.5/js/jquery.dataTables.min.js"></script>
 <script src="//cdn.datatables.net/plug-ins/f2c75b7247b/integration/bootstrap/3/dataTables.bootstrap.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"> </script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.4.0/languages/json.min.js"></script>
 
 <script type="text/javascript">
 var s3exp_config = { Region: '', Bucket: '', Prefix: '', Delimiter: '/' };
@@ -127,8 +146,23 @@ var s3exp_columns = { key:1, folder:2, date:3, size:4 };
 AWS.config.region = 'us-east-1';
 console.log('Region: ' + AWS.config.region);
 
+function getS3Obj() {
+  return new AWS.S3({endpoint: 'http://127.0.0.1:4572', s3ForcePathStyle: true});
+}
+
+function getSvcDomain() {
+  return ".localhost:4572/";
+}
+
+function getFileContents(url, cb) {
+   var xhr = new XMLHttpRequest();
+   xhr.open("GET", url);
+   xhr.addEventListener('load', () => cb(xhr.responseText));
+   xhr.send();
+}
+
 // Initialize S3 SDK and the moment library (for time formatting utilities)
-var s3 = new AWS.S3();
+var s3 = getS3Obj();
 moment().format();
 
 function bytesToSize(bytes) {
@@ -146,18 +180,11 @@ if (typeof String.prototype.endsWith != 'function') {
 }
 
 function object2hrefvirt(bucket, object) {
+    var dom = getSvcDomain();
     if (AWS.config.region === "us-east-1") {
-        return document.location.protocol + '//' + bucket + '.s3.amazonaws.com/' + object;
+        return document.location.protocol + '//' + bucket + '.s3' + dom + object;
     } else {
-        return document.location.protocol + '//' + bucket + '.s3-' + AWS.config.region + '.amazonaws.com/' + object;
-    }
-}
-
-function object2hrefpath(bucket, object) {
-    if (AWS.config.region === "us-east-1") {
-        return document.location.protocol + "//s3.amazonaws.com/" + bucket + "/" + object;
-    } else {
-        return document.location.protocol + "//s3-' + AWS.config.region + '.amazonaws.com/" + bucket + "/" + object;
+        return document.location.protocol + '//' + bucket + '.s3-' + AWS.config.region + dom + object;
     }
 }
 
@@ -352,13 +379,19 @@ function s3list(config, completecb) {
 }
 
 function promptForBucketInput() {
-    bootbox.prompt("Please enter the S3 bucket name", function(result) {
+   bootbox.prompt(
+     {
+       title: "Please enter the S3 bucket name",
+       value: "drz-editor-db-",
+       callback: function(result) {
         if (result !== null) {
             resetDepth();
             s3exp_config = { Bucket: result, Delimiter: '/' };
             (s3exp_lister = s3list(s3exp_config, s3draw)).go();
         }
-    });
+       }
+     }
+   );
 }
 
 function resetDepth() {
@@ -486,7 +519,23 @@ $(document).ready(function(){
             (s3exp_lister = s3list(s3exp_config, s3draw)).go();
         // Else user has clicked on an object so download it in new window/tab
         } else {
-            window.open(target.href, '_blank');
+          /* window.open(target.href, '_blank');*/
+          console.log(target.href);
+          // Empty contents
+          var modal = $('#documentContent');
+          var codeBlock = modal.find('.modal-body > pre > code');
+          codeBlock.text('');
+
+          // Load content
+          getFileContents(target.href, data => {
+            codeBlock.text(data);
+            modal.modal();
+            hljs.highlightBlock(document.querySelector('#documentContent .modal-body pre code'))
+          });
+
+          // Bind event listeners
+          modal.find('.downloadFile').one('click', () => window.open(target.href, '_blank'));
+
         }
         return false;
     });
@@ -572,7 +621,7 @@ $(document).ready(function(){
         console.log("AWS region=" + AWS.config.region);
 
         // Create and initialize S3 object
-        s3 = new AWS.S3();
+        s3 = getS3Obj();
         s3exp_config = { Bucket: bucket, Delimiter: '/' };
 
         // Do initial bucket list
